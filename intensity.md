@@ -1,7 +1,7 @@
 intensity.py
 ============
 
- 
+https://github.com/penfever/intensity
 
 As a filmmaker and film historian, I found myself wondering about certain
 questions that lacked (to my knowledge) satisfying answers. For instance:

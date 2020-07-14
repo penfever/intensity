@@ -1,90 +1,171 @@
-import glob
-import cv2
+"""This script measures the average intensity level of a video file and saves it to a database."""
+
 import time
 import statistics
-import numpy as np
-import sqlite3
-import matplotlib.pyplot as plt
 import os
-NFDB = sqlite3.connect('NFDB.db')
-c = NFDB.cursor()
-c.execute('''CREATE TABLE IF NOT EXISTS movies (id INT, imdbid TEXT, title VARCHAR[255], year YEAR, length TIME, filmintensity FLOAT(5))''')
-vids = glob.glob('.\*.avi') + glob.glob('.\*.mkv') + glob.glob('.\*.mp4') + glob.glob('.\*.m4v')
-moviecount = 0
-intdb = {}
-moviesdb = c.execute('''SELECT * FROM movies''')
-for row in moviesdb:
-    moviecount += 1
-for vid in range(len(vids)):
-    intdb[vid] = {}
-    intdb[vid]['year'] = 0
-    end = len(vids[vid])-4
-    intdb[vid]['title'] = vids[vid][2:end]
-    m1=vids[vid].find('(')
-    m2=vids[vid].find('19') or vids[vid].find('20')
-    if m1 != -1:
-        marker = m1
-        intdb[vid]['title'] = vids[vid][2:marker - 1]
-        intdb[vid]['year'] = int(vids[vid][marker + 1:marker + 5])
-    elif m2 != -1 and isinstance(vids[vid][m2:m2+4], int):     
-        marker = m2
-        intdb[vid]['title'] = vids[vid][2:marker - 1]
-        intdb[vid]['year'] = int(vids[vid][marker:marker + 4])
-    ##check if the video has already been scanned
-    flag = 1
-    if intdb[vid]['title'] in moviesdb:
-        if moviesdb['year'] == intdb[vid]['year']:
-            print("match in db")
-            flag = 0;
-            break
-    if flag == 0:
-        break
-    ##continue setting variables
-    intdb[vid]['intensity'] = []
-    id = moviecount + vid + 1
-    strid = "{}".format(id)
-    stryear = "{}".format(intdb[vid]['year'])
-    ##begin scanning the video
-    flag = 1
+import sqlite3
+import glob
+import multiprocessing
+import nfdbhelp
+import numpy as np
+import matplotlib.pyplot as plt
+from imdb import IMDb
+import cv2
+
+def checkdb(i_v, viddc):
+    check_id = 0
+    count_id = str(moviecount + viddc + 1)
+    if i_v is False:
+        try:
+            with lock:
+                c.execute(f'''SELECT id FROM movies WHERE imdbid is {str(i_v)}''')
+        except:
+            pass
+        iid = c.fetchall()
+        check_id = str(c.fetchall())
+        if iid == []:
+            iid = i_v
+    else:
+        iid = count_id
+    strid_d = "{}".format(iid)
     try:
-        cap = cv2.VideoCapture(vids[vid])
+        with lock:
+            c.execute('SELECT * FROM "' + strid_d +'intensity"')
+        if len(c.fetchall) > 100:
+            return 'False'
     except:
-        flag = 0
-    if flag == 0:
+        pass
+    try:
+        with lock:
+            c.execute('SELECT * FROM "' + check_id +'intensity"')
+        if len(c.fetchall) > 100:
+            return 'False'
+    except:
+        pass
+
+    try:
+        with lock:
+            c.execute('SELECT * FROM "' + count_id +'rgbintensity"')
+        if len(c.fetchall) > 100:
+            return 'False'
+    except:
+        pass
+    return strid_d
+
+def vidtest(clip):
+    """checks if video is playable, and if so, returns the capture link"""
+    try:
+        capc = cv2.VideoCapture(clip)
+        return capc
+    except:
         print("CV2 error")
-        break
+        return
+
+def ityplot(ndir, viddc):
+    """Draws and saves the chart"""
+    plt.plot(intdb[viddc]['intensity'], linewidth=.25)
+    plt.title(intdb[viddc]['title'] + '-' + intdb[viddc]['length'] + '-Intensity')
+    plt.ylabel('Intensity/Brightness')
+    plt.ylim(0, 100)
+    plt.xlabel('Frames')
+    if not os.path.exists('results'):
+        os.makedirs('results')
+    count = 0
+    while os.path.exists(f'./results/{ndir}.png'):
+        count += 1
+        ndir = ndir + str(count)
+    try:
+        plt.savefig(os.path.join('results', ndir + '.png'), dpi=300)
+    except:
+        pass
+    plt.clf()
+
+def intensity(id_count):
+    #initialize variables
+    global counter
+    with counter.get_lock():
+        counter.value += 1
+        vc = counter.value
+    id_count_str = str(id_count + vc)
+    intdb[vc] = {}
+    intdb[vc]['intensity'] = []
+    #labeling for DB and checking for duplicates
+    intdb[vc]['title'], intdb[vc]['year'], code = nfdbhelp.makename(vids[n])
+    if code != 2:
+        imid = nfdbhelp.imscan(intdb[vc]['title'], intdb[vc]['year'], vc, 0, 0)
+    else:
+        imid = 0
+    strid = checkdb(imid, vc)
+    if strid is 'False':
+        print("Table already exists. Skipping.")
+        return
+    stryear = "{}".format(intdb[vc]['year'])
+    #testing video playback
+    cap = vidtest(vids[vc])
+    if cap is None:
+        print("CV2 error")
+        return
+    #begin scanning the video
+    starttime = time.perf_counter()
     fc = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print(fc)
+    if fc == 0:
+        return
     fps = cap.get(cv2.CAP_PROP_FPS)
-    intdb[vid]['length'] = time.strftime('%H:%M:%S', time.gmtime(fc/fps))
+    intdb[vc]['length'] = time.strftime('%H:%M:%S', time.gmtime(fc/fps))
+    if code == 2:
+        frame_time = int(((fc/fps)/60))
+        imid, intdb[vc]['year'] = nfdbhelp.imscan(intdb[vc]['title'], intdb[vc]['year'], vc, 2, frame_time)
+    if imid is 0:
+        print("No IMDb match found.")
+    else:
+        print(f"Video {vc + 1} of {len(vids)} is called {intdb[vc]['title']} and has a frame count of {fc}.")
+        print(f"IMDb ID is {imid}.\n")
     idstr = 'CREATE TABLE IF NOT EXISTS "' + strid + 'intensity" (intensity FLOAT(5))'
-    c.execute(idstr)
+    with lock:
+        c.execute(idstr)
     idstr = 'INSERT INTO "' + strid + 'intensity" '
-    args = 'Intensity-' + intdb[vid]['title'] + '-' + stryear
-    for i in range(fc):
+    savepath = intdb[vc]['title'] + '-' + strid + '-Intensity'
+    for _ in range(fc):
         ret, frame = cap.read()
-        frame = np.ma.masked_equal(frame,0)
+        frame = np.ma.masked_less_equal(frame, 4)
         try:
             framemean = (np.mean(frame)/255)*100
         except:
             framemean = np.arange(1)
-        pyf = framemean.item()
-        intdb[vid]['intensity'].append(pyf)
-        c.execute(idstr + 'VALUES (?)',(pyf,))
-    intdb[vid]['filmintensity'] = statistics.mean(intdb[vid]['intensity'])
+        if framemean > 1:
+            pyf = framemean.item()
+            intdb[vc]['intensity'].append(pyf)
+            with lock:
+                c.execute(idstr + 'VALUES (?)', (pyf, ))
+    intdb[vc]['filmintensity'] = statistics.mean(intdb[vc]['intensity'])
     cap.release()
     cv2.destroyAllWindows()
-    c.execute('INSERT INTO movies VALUES (?, ?, ?, ?, ?, ?)',(strid, None, intdb[vid]['title'], intdb[vid]['year'], intdb[vid]['length'], intdb[vid]['filmintensity']))
-    #save the chart
-    plt.plot(intdb[vid]['intensity'])
-    plt.title(intdb[vid]['title'] + '-' + intdb[vid]['length'] + '-Intensity')
-    plt.ylabel('Intensity/Brightness')
-    plt.ylim(0,100)
-    plt.xlabel('Frames')
-    if not os.path.exists('results'):
-        os.makedirs('results')
-    plt.savefig(os.path.join('results', args + '.png'), dpi=300)
-    plt.clf()
-    print(intdb[vid]['title'])
-NFDB.commit()
-NFDB.close()
+    with lock:
+        c.execute('INSERT INTO movies VALUES (?, ?, ?, ?, ?, ?)', (id_count_str, imid, intdb[vc]['title'], intdb[vc]['year'], intdb[vc]['length'], intdb[vc]['filmintensity']))
+    ityplot(savepath, vc)
+    print(f"{intdb[vc]['title']} completed. Runtime was {time.perf_counter() - starttime} seconds.")
+    return
+
+if __name__ == '__main__':
+    #define globals, retrieve local DB, IMDb
+    NFDB = sqlite3.connect('NFDB.db')
+    c = NFDB.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS movies (id INT, imdbid BIGINT, title VARCHAR[255], year YEAR, length TIME, filmintensity FLOAT(5))''')
+    vids = nfdbhelp.getvids('local')
+    intdb = {}
+    im = IMDb()
+    c.execute('''SELECT * FROM movies''')
+    moviesdb = c.fetchall()
+    moviecount = len(moviesdb)
+    #multiprocessing setup
+    counter = multiprocessing.Value('i', -1)
+    p_count = multiprocessing.cpu_count()-1 or 1
+    lock = multiprocessing.Lock()
+    idcount = len(moviesdb) + 1
+    with multiprocessing.Pool(p_count) as p:
+        for n in range(len(vids)):
+            p.map_async(intensity(idcount), vids[n], )
+    print("Batch complete.")
+    c.close()
+    NFDB.commit()
+    NFDB.close()
