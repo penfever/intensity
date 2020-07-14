@@ -3,6 +3,7 @@
 import time
 import statistics
 import os
+import shutil
 import sqlite3
 import glob
 import multiprocessing
@@ -68,19 +69,18 @@ def ityplot(ndir, viddc):
     plt.ylabel('Intensity/Brightness')
     plt.ylim(0, 100)
     plt.xlabel('Frames')
-    if not os.path.exists('results'):
-        os.makedirs('results')
     count = 0
-    while os.path.exists(f'./results/{ndir}.png'):
+    while os.path.exists(ndir):
         count += 1
         ndir = ndir + str(count)
     try:
-        plt.savefig(os.path.join('results', ndir + '.png'), dpi=300)
+        plt.savefig(ndir, dpi=300)
     except:
+        print("Chart could not be saved.")
         pass
     plt.clf()
 
-def intensity(id_count):
+def intensity(id_count, database_dir):
     #initialize variables
     global counter
     with counter.get_lock():
@@ -96,7 +96,7 @@ def intensity(id_count):
     else:
         imid = 0
     strid = checkdb(imid, vc)
-    if strid is 'False':
+    if strid == 'False':
         print("Table already exists. Skipping.")
         return
     stryear = "{}".format(intdb[vc]['year'])
@@ -115,7 +115,7 @@ def intensity(id_count):
     if code == 2:
         frame_time = int(((fc/fps)/60))
         imid, intdb[vc]['year'] = nfdbhelp.imscan(intdb[vc]['title'], intdb[vc]['year'], vc, 2, frame_time)
-    if imid is 0:
+    if imid == 0:
         print("No IMDb match found.")
     else:
         print(f"Video {vc + 1} of {len(vids)} is called {intdb[vc]['title']} and has a frame count of {fc}.")
@@ -124,9 +124,14 @@ def intensity(id_count):
     with lock:
         c.execute(idstr)
     idstr = 'INSERT INTO "' + strid + 'intensity" '
-    savepath = intdb[vc]['title'] + '-' + strid + '-Intensity'
+    savepath = r'C:\\Code\\Other\\intensity_charts\\'
+    if not os.path.exists(savepath):
+        os.makedirs(savepath)   
+    savepath = savepath + intdb[vc]['title'] + '-' + strid + '-Intensity.png'
     for _ in range(fc):
         ret, frame = cap.read()
+        if frame is None:
+            continue
         frame = np.ma.masked_less_equal(frame, 4)
         try:
             framemean = (np.mean(frame)/255)*100
@@ -148,10 +153,11 @@ def intensity(id_count):
 
 if __name__ == '__main__':
     #define globals, retrieve local DB, IMDb
-    NFDB = sqlite3.connect('NFDB.db')
+    dbdir = r'C:\\Code\\Other\\NFDB.db'
+    NFDB = sqlite3.connect(dbdir)
     c = NFDB.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS movies (id INT, imdbid BIGINT, title VARCHAR[255], year YEAR, length TIME, filmintensity FLOAT(5))''')
-    vids = nfdbhelp.getvids('local')
+    vids = nfdbhelp.get_vids('sample')
     intdb = {}
     im = IMDb()
     c.execute('''SELECT * FROM movies''')
@@ -164,7 +170,7 @@ if __name__ == '__main__':
     idcount = len(moviesdb) + 1
     with multiprocessing.Pool(p_count) as p:
         for n in range(len(vids)):
-            p.map_async(intensity(idcount), vids[n], )
+            p.map_async(intensity(idcount, dbdir), vids[n], )
     print("Batch complete.")
     c.close()
     NFDB.commit()
