@@ -51,7 +51,7 @@ def checkdb(i_v, viddc):
             return 'False'
     except:
         pass
-    return strid_d
+    return strid_d, iid
 
 def vidtest(clip):
     """checks if video is playable, and if so, returns the capture link"""
@@ -69,10 +69,10 @@ def ityplot(ndir, viddc):
     plt.ylabel('Intensity/Brightness')
     plt.ylim(0, 100)
     plt.xlabel('Frames')
-    count = 0
+    _ = 0
     while os.path.exists(ndir):
-        count += 1
-        ndir = ndir + str(count)
+        _ += 1
+        ndir = ndir + str(_)
     try:
         plt.savefig(ndir, dpi=300)
     except:
@@ -80,26 +80,24 @@ def ityplot(ndir, viddc):
         pass
     plt.clf()
 
-def intensity(id_count, database_dir):
+def intensity(database_dir):
     #initialize variables
     global counter
     with counter.get_lock():
         counter.value += 1
         vc = counter.value
-    id_count_str = str(id_count + vc)
+    countid = moviecount + vc + 1
     intdb[vc] = {}
     intdb[vc]['intensity'] = []
     #labeling for DB and checking for duplicates
     intdb[vc]['title'], intdb[vc]['year'], code = nfdbhelp.makename(vids[n])
     if code != 2:
-        imid = nfdbhelp.imscan(intdb[vc]['title'], intdb[vc]['year'], vc, 0, 0)
+        imid, _ = nfdbhelp.imscan(intdb[vc]['title'], intdb[vc]['year'], vc, 0, 0)
     else:
         imid = 0
-    strid = checkdb(imid, vc)
-    if strid == 'False':
+    if checkdb(imid, vc) == 'False':
         print("Table already exists. Skipping.")
         return
-    stryear = "{}".format(intdb[vc]['year'])
     #testing video playback
     cap = vidtest(vids[vc])
     if cap is None:
@@ -116,10 +114,12 @@ def intensity(id_count, database_dir):
         frame_time = int(((fc/fps)/60))
         imid, intdb[vc]['year'] = nfdbhelp.imscan(intdb[vc]['title'], intdb[vc]['year'], vc, 2, frame_time)
     if imid == 0:
-        print("No IMDb match found.")
+        print("No IMDb match found. Using local count.")
+        strid = str(countid)
     else:
         print(f"Video {vc + 1} of {len(vids)} is called {intdb[vc]['title']} and has a frame count of {fc}.")
         print(f"IMDb ID is {imid}.\n")
+        strid = str(imid)
     idstr = 'CREATE TABLE IF NOT EXISTS "' + strid + 'intensity" (intensity FLOAT(5))'
     with lock:
         c.execute(idstr)
@@ -146,7 +146,7 @@ def intensity(id_count, database_dir):
     cap.release()
     cv2.destroyAllWindows()
     with lock:
-        c.execute('INSERT INTO movies VALUES (?, ?, ?, ?, ?, ?)', (id_count_str, imid, intdb[vc]['title'], intdb[vc]['year'], intdb[vc]['length'], intdb[vc]['filmintensity']))
+        c.execute('INSERT INTO movies VALUES (?, ?, ?, ?, ?, ?)', (countid, imid, intdb[vc]['title'], intdb[vc]['year'], intdb[vc]['length'], intdb[vc]['filmintensity']))
     ityplot(savepath, vc)
     print(f"{intdb[vc]['title']} completed. Runtime was {time.perf_counter() - starttime} seconds.")
     return
@@ -170,7 +170,7 @@ if __name__ == '__main__':
     idcount = len(moviesdb) + 1
     with multiprocessing.Pool(p_count) as p:
         for n in range(len(vids)):
-            p.map_async(intensity(idcount, dbdir), vids[n], )
+            p.map_async(intensity(dbdir), vids[n], )
     print("Batch complete.")
     c.close()
     NFDB.commit()
