@@ -182,7 +182,10 @@ if __name__ == '__main__':
     NFDB = sqlite3.connect('NFDB.db')
     c = NFDB.cursor()
     c.execute('''CREATE TABLE IF NOT EXISTS movies (id INT, imdbid BIGINT, title VARCHAR[255], year YEAR, length TIME, filmintensity FLOAT(5))''')
-    vids = nfdbhelp.getvids('local')
+    vids = nfdbhelp.get_vids('sample')
+    if vids is False:
+        print("That is not a valid directory.")
+        exit(code=1)
     intdb = {}
     c.execute('''SELECT * FROM movies''')
     moviesdb = c.fetchall()
