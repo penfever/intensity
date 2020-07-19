@@ -3,9 +3,7 @@
 import time
 import statistics
 import os
-import shutil
 import sqlite3
-import glob
 import multiprocessing
 import nfdbhelp
 import numpy as np
@@ -64,9 +62,9 @@ def vidtest(clip):
 
 def ityplot(ndir, viddc):
     """Draws and saves the chart"""
-    plt.plot(intdb[viddc]['intensity'], linewidth=.25)
+    plt.plot(intdb[viddc]['intensity'], intdb[viddc]['contrast'], linewidth=.25)
     plt.title(intdb[viddc]['title'] + '-' + intdb[viddc]['length'] + '-Intensity')
-    plt.ylabel('Intensity/Brightness')
+    plt.ylabel('Intensity/Contrast')
     plt.ylim(0, 100)
     plt.xlabel('Frames')
     _ = 0
@@ -77,10 +75,9 @@ def ityplot(ndir, viddc):
         plt.savefig(ndir, dpi=300)
     except:
         print("Chart could not be saved.")
-        pass
     plt.clf()
 
-def intensity(database_dir):
+def intensity():
     #initialize variables
     global counter
     with counter.get_lock():
@@ -89,6 +86,7 @@ def intensity(database_dir):
     countid = moviecount + vc + 1
     intdb[vc] = {}
     intdb[vc]['intensity'] = []
+    intdb[vc]['contrast'] = []
     #labeling for DB and checking for duplicates
     intdb[vc]['title'], intdb[vc]['year'], code = nfdbhelp.makename(vids[n])
     if code != 2:
@@ -120,19 +118,35 @@ def intensity(database_dir):
         print(f"Video {vc + 1} of {len(vids)} is called {intdb[vc]['title']} and has a frame count of {fc}.")
         print(f"IMDb ID is {imid}.\n")
         strid = str(imid)
-    idstr = 'CREATE TABLE IF NOT EXISTS "' + strid + 'intensity" (intensity FLOAT(5))'
+    idstr = 'CREATE TABLE IF NOT EXISTS "' + strid + 'intensity" (intensity FLOAT(5), contrast FLOAT(10), cont_max INT, cont_min INT)'
     with lock:
         c.execute(idstr)
     idstr = 'INSERT INTO "' + strid + 'intensity" '
     savepath = r'C:\\Code\\Other\\intensity_charts\\'
     if not os.path.exists(savepath):
-        os.makedirs(savepath)   
+        os.makedirs(savepath)
     savepath = savepath + intdb[vc]['title'] + '-' + strid + '-Intensity.png'
     for _ in range(fc):
         ret, frame = cap.read()
         if frame is None:
             continue
-        frame = np.ma.masked_less_equal(frame, 4)
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        rev_fr = np.reshape(frame, frame.size)
+        rev_fr = np.sort(frame)[-1]
+        # print(rev_fr)
+        rev_fr_st = rev_fr[1:]
+        xy_sum = 0
+        for _ in np.nditer(rev_fr):
+            if _:
+                xy_sum = (xy_sum + np.subtract(rev_fr[_], rev_fr[_ + 1])) / 2
+        con_max = np.max(frame).item()
+        con_min = np.min(frame).item()
+        if isinstance(int, xy_sum):
+            con_avg = xy_sum
+        else:
+            con_avg = xy_sum.item()
+        intdb[vc]['contrast'].append(con_avg)
+        frame = np.ma.masked_less_equal(frame, 3)
         try:
             framemean = (np.mean(frame)/255)*100
         except:
@@ -141,22 +155,28 @@ def intensity(database_dir):
             pyf = framemean.item()
             intdb[vc]['intensity'].append(pyf)
             with lock:
-                c.execute(idstr + 'VALUES (?)', (pyf, ))
+                c.execute(idstr + 'VALUES (?, ?, ?, ?)', (pyf, con_avg, con_max, con_min))
+        else:
+            intdb[vc]['intensity'].append(0)
     intdb[vc]['filmintensity'] = statistics.mean(intdb[vc]['intensity'])
+    intdb[vc]['filmaverage'] = statistics.mean(intdb[vc]['contrast'])
+    print("Film contrast average was {}, intensity average was {}.".format(intdb[vc]['filmaverage'], intdb[vc]['filmintensity']))
     cap.release()
     cv2.destroyAllWindows()
     with lock:
-        c.execute('INSERT INTO movies VALUES (?, ?, ?, ?, ?, ?)', (countid, imid, intdb[vc]['title'], intdb[vc]['year'], intdb[vc]['length'], intdb[vc]['filmintensity']))
+        c.execute('INSERT INTO movies VALUES (?, ?, ?, ?, ?, ?, ?)', (countid, imid, intdb[vc]['title'], intdb[vc]['year'], intdb[vc]['length'], intdb[vc]['filmintensity'], intdb[vc]['filmaverage']))
     ityplot(savepath, vc)
     print(f"{intdb[vc]['title']} completed. Runtime was {time.perf_counter() - starttime} seconds.")
     return
 
 if __name__ == '__main__':
     #define globals, retrieve local DB, IMDb
-    dbdir = r'C:\\Code\\Other\\NFDB.db'
+    dbdir = r'.\\Other\\NFDB.db'
+    if not os.path.isfile(dbdir):
+        with open(f'{dbdir}', 'w+'): pass
     NFDB = sqlite3.connect(dbdir)
     c = NFDB.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS movies (id INT, imdbid BIGINT, title VARCHAR[255], year YEAR, length TIME, filmintensity FLOAT(5))''')
+    c.execute('''CREATE TABLE IF NOT EXISTS movies (id INT, imdbid BIGINT, title VARCHAR[255], year YEAR, length TIME, filmintensity FLOAT(5), filmcontrast FLOAT(5))''')
     vids = nfdbhelp.get_vids('sample')
     intdb = {}
     im = IMDb()
@@ -170,7 +190,7 @@ if __name__ == '__main__':
     idcount = len(moviesdb) + 1
     with multiprocessing.Pool(p_count) as p:
         for n in range(len(vids)):
-            p.map_async(intensity(dbdir), vids[n], )
+            p.map_async(intensity(), vids[n], )
     print("Batch complete.")
     c.close()
     NFDB.commit()
