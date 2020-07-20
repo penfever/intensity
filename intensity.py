@@ -128,6 +128,7 @@ def intensity():
         imid, _ = nfdbhelp.imscan(intdb[vc]['title'], intdb[vc]['year'], vc, 0, 0)
     else:
         print("No IMDb match found. Using local count.")
+        imid = 0
         strid = str(countid)
     if checkdb(imid, vc) == 'False':
         print("Table already exists. Skipping.")
@@ -187,23 +188,18 @@ def intensity():
             continue
         if bwflag is True:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        rev_fr = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         rev_fr = np.reshape(frame, frame.size)
-        rev_fr = np.sort(frame)[-1]
-        xy_sum = 0
-        for _ in np.nditer(rev_fr):
-            if _:
-                xy_sum = (xy_sum + np.subtract(rev_fr[_], rev_fr[_ + 1])) / 2
+        # rev_fr = np.sort(frame)[-1]
+        diff_fr = float(np.mean(np.diff(rev_fr)))
+        # print(rev_fr)
+        # xy_sum = float(0.0)
+        # for numby in range(len(rev_fr)):
+        #     if rev_fr[numby + 1]:
+        #         xy_sum = xy_sum + (rev_fr[numby] - rev_fr[numby + 1] / 2)
         con_max = np.max(frame).item()
         con_min = np.min(frame).item()
-        try:
-            con_avg = xy_sum.item()
-        except:
-            try:
-                con_avg = float(xy_sum)
-            except:
-                print("con_avg could not be added.")
-                con_avg = 0
-        intdb[vc]['contrast'].append(con_avg)
+        intdb[vc]['contrast'].append(diff_fr)
         frame = np.ma.masked_less_equal(frame, 3)
         if bwflag is False:
             try:
@@ -235,11 +231,11 @@ def intensity():
             pyf = framemean.item()
             intdb[vc]['intensity'].append(pyf)
             with lock:
-                c.execute('INSERT INTO "' + strid + 'intensity" VALUES (?, ?, ?, ?)', (pyf, con_avg, con_max, con_min))
+                c.execute('INSERT INTO "' + strid + 'intensity" VALUES (?, ?, ?, ?)', (pyf, diff_fr, con_max, con_min))
         else:
             intdb[vc]['intensity'].append(0)
     intdb[vc]['filmintensity'] = statistics.mean(intdb[vc]['intensity'])
-    intdb[vc]['filmaverage'] = np.mean(intdb[vc]['contrast'])
+    intdb[vc]['filmaverage'] = statistics.mean(intdb[vc]['contrast'])
     print("Film contrast average was {}, intensity average was {}.".format(intdb[vc]['filmaverage'], intdb[vc]['filmintensity']))
     if bwflag is False:
         intdb[vc]['r_filmintensity'] = statistics.mean(intdb[vc]['r_intensity'])
@@ -257,7 +253,7 @@ def intensity():
 
 if __name__ == '__main__':
     #define globals, retrieve local DB, IMDb
-    dbdir = r'.\\Other\\NFDB.db'
+    dbdir = r'C:\\Code\\Other\\NFDB.db'
     if not os.path.isfile(dbdir):
         with open(f'{dbdir}', 'w+'): pass
     NFDB = sqlite3.connect(dbdir)
