@@ -66,19 +66,20 @@ def ityplot(ndir, viddc):
         intdb[viddc]['contrast'].append(0)
     while len(intdb[viddc]['contrast']) < len(intdb[viddc]['intensity']):
         intdb[viddc]['intensity'].append(0)
-    plt.plot(intdb[viddc]['intensity'], intdb[viddc]['contrast'], linewidth=.25)
+    plt.plot(intdb[viddc]['contrast'], color='Brown', label = "Contrast", linewidth=.25)
+    plt.plot(intdb[viddc]['intensity'], label = "Intensity", linewidth=.25)
     plt.title(intdb[viddc]['title'] + '-' + intdb[viddc]['length'] + '-Intensity')
     plt.ylabel('Intensity/Contrast')
     plt.ylim(0, 100)
     plt.xlabel('Frames')
     _ = 0
-    while os.path.exists(ndir):
-        _ += 1
-        ndir = ndir + str(_)
-    try:
-        plt.savefig(ndir, dpi=300)
-    except:
-        print("Chart could not be saved.")
+    if os.path.exists(ndir):
+        print("Old chart deleted.")
+        os.remove(ndir)
+    plt.savefig(ndir, dpi=300)
+    print("New chart saved.")
+    # except:
+    #    print("Chart could not be saved.")
     plt.clf()
 
 def checkcolor(vidc, cappy):
@@ -188,24 +189,21 @@ def intensity():
             continue
         if bwflag is True:
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        rev_fr = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        rev_fr = np.reshape(frame, frame.size)
-        # rev_fr = np.sort(frame)[-1]
-        diff_fr = float(np.mean(np.diff(rev_fr)))
-        # print(rev_fr)
-        # xy_sum = float(0.0)
-        # for numby in range(len(rev_fr)):
-        #     if rev_fr[numby + 1]:
-        #         xy_sum = xy_sum + (rev_fr[numby] - rev_fr[numby + 1] / 2)
-        con_max = np.max(frame).item()
-        con_min = np.min(frame).item()
+        if np.ndim(frame) == 3:
+            rev_fr = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        else:
+            rev_fr = frame
+        rev_fr = np.reshape(rev_fr, rev_fr.size)
+        diff_fr = float(np.mean(np.diff(rev_fr))/2.56)
+        con_max = len(np.where(rev_fr < 50)) / rev_fr.size
+        con_min = len(np.where(rev_fr > 205)) / rev_fr.size
         intdb[vc]['contrast'].append(diff_fr)
         frame = np.ma.masked_less_equal(frame, 3)
         if bwflag is False:
             try:
-                r_framemean = (np.mean(frame[:, :, 0])/255)*100
-                g_framemean = (np.mean(frame[:, :, 1])/255)*100
-                b_framemean = (np.mean(frame[:, :, 2])/255)*100
+                r_framemean = (np.mean(frame[:, :, 0])/2.56)
+                g_framemean = (np.mean(frame[:, :, 1])/2.56)
+                b_framemean = (np.mean(frame[:, :, 2])/2.56)
             except:
                 r_framemean = np.arange(1)
                 g_framemean = np.arange(1)
@@ -224,7 +222,7 @@ def intensity():
                 with lock:
                     c.execute('INSERT INTO "' + strid + 'rgbintensity" VALUES (?, ?, ?)', (r_pyf, g_pyf, b_pyf))
         try:
-            framemean = (np.mean(frame)/255)*100
+            framemean = (np.mean(frame)/2.56)
         except:
             framemean = np.arange(1)
         if framemean > 1:
@@ -236,11 +234,12 @@ def intensity():
             intdb[vc]['intensity'].append(0)
     intdb[vc]['filmintensity'] = statistics.mean(intdb[vc]['intensity'])
     intdb[vc]['filmaverage'] = statistics.mean(intdb[vc]['contrast'])
-    print("Film contrast average was {}, intensity average was {}.".format(intdb[vc]['filmaverage'], intdb[vc]['filmintensity']))
+    print("Film average contrast was {} percent, average intensity was {} percent.".format(intdb[vc]['filmaverage'], intdb[vc]['filmintensity']))
     if bwflag is False:
         intdb[vc]['r_filmintensity'] = statistics.mean(intdb[vc]['r_intensity'])
         intdb[vc]['g_filmintensity'] = statistics.mean(intdb[vc]['g_intensity'])
         intdb[vc]['b_filmintensity'] = statistics.mean(intdb[vc]['b_intensity'])
+        print("RGB intensity calculated.")
         with lock:
             c.execute('INSERT INTO "' + strid + 'rgbfilmintensity" ' + 'VALUES (?, ?, ?, ?)', (str(imid), intdb[vc]['r_filmintensity'], intdb[vc]['g_filmintensity'], intdb[vc]['b_filmintensity']))
     cap.release()
